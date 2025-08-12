@@ -1,0 +1,70 @@
+name: Sync upstream/main to fork's main + backups (containers)
+
+on:
+  schedule:
+    - cron: "0 1 * * *"   # täglich 01:00 UTC = 03:00 Berlin (Sommerzeit)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM: https://github.com/bitnami/containers.git
+  RETENTION_DAYS: "28"
+  BACKUP_PREFIX: "backup/main-"
+  TZ: "Europe/Berlin"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout automation branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add remotes & fetch
+        run: |
+          git remote add upstream "$UPSTREAM" || true
+          git fetch origin --prune
+          git fetch upstream --prune --tags
+
+      - name: "Guard: ensure upstream main exists"
+        run: git ls-remote --exit-code --heads upstream main >/dev/null
+
+      # Backup vor dem Sync (aus aktuellem Fork-main)
+      - name: Create nightly backup branch from current main
+        run: |
+          set -e
+          git fetch origin main:refs/remotes/origin/main
+          BACKUP_BRANCH="${BACKUP_PREFIX}$(TZ=$TZ date +%F)"
+          git branch -f "$BACKUP_BRANCH" refs/remotes/origin/main
+          git push --force-with-lease origin "refs/heads/$BACKUP_BRANCH:refs/heads/$BACKUP_BRANCH"
+
+      # Upstream → Fork main (hart spiegeln, damit 1:1 identisch)
+      - name: Update fork's main from upstream/main (force mirror)
+        run: |
+          set -e
+          git fetch upstream main
+          git push origin upstream/main:main --force
+
+      # Alte Backups entfernen
+      - name: Prune backup branches older than RETENTION_DAYS
+        run: |
+          set -e
+          CUTOFF="$(TZ=$TZ date -d "-${RETENTION_DAYS} days" +%F)"
+          git ls-remote --heads origin "${BACKUP_PREFIX}*" \
+            | awk '{print $2}' | sed 's#refs/heads/##' \
+            | while read -r br; do
+                DATE_PART="${br##${BACKUP_PREFIX}}"
+                if [[ "$DATE_PART" < "$CUTOFF" ]]; then
+                  echo "Deleting old backup branch: $br"
+                  git push origin --delete "$br"
+                fi
+              done
+
