@@ -47,6 +47,7 @@ jobs:
           git push --force-with-lease origin "refs/heads/$BACKUP_BRANCH:refs/heads/$BACKUP_BRANCH"
 
       # Sync: Upstream → Fork main (ohne Workflow-Dateien)
+      # Diese Lösung vermeidet das Permissions-Problem mit Workflow-Dateien
       - name: Update fork's main from upstream/main (excluding workflow files)
         run: |
           # Erstelle temporären Branch für den Sync
@@ -57,16 +58,21 @@ jobs:
           # Hole aktuellen Stand von main
           git fetch origin main:refs/remotes/origin/main
           
-          # Kopiere .github/workflows von origin/main
-          mkdir -p .github/workflows-backup
-          cp -r .github/workflows/* .github/workflows-backup/ 2>/dev/null || true
+          # Bewahre .github/workflows aus dem Fork
+          echo "Bewahre Workflow-Dateien aus dem Fork"
           git checkout origin/main -- .github/workflows
           
-          # Commit die Änderungen
+          # Commit die Änderungen nur wenn es Änderungen gibt
           git add .github/workflows
-          git diff --staged --quiet || git commit -m "Preserve workflow files from fork"
+          if ! git diff --staged --quiet; then
+            git commit -m "Preserve workflow files from fork"
+            echo "Workflow-Dateien wurden beibehalten"
+          else
+            echo "Keine Änderungen an Workflow-Dateien"
+          fi
           
           # Push zum main branch
+          echo "Aktualisiere main Branch"
           git push origin temp-sync-branch:main --force
 
       # Alte Backups entfernen
