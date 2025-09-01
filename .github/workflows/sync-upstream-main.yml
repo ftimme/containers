@@ -46,12 +46,28 @@ jobs:
           git branch -f "$BACKUP_BRANCH" refs/remotes/origin/main
           git push --force-with-lease origin "refs/heads/$BACKUP_BRANCH:refs/heads/$BACKUP_BRANCH"
 
-      # Upstream → Fork main (hart spiegeln, damit 1:1 identisch)
-      - name: Update fork's main from upstream/main (force mirror)
+      # Sync: Upstream → Fork main (ohne Workflow-Dateien)
+      - name: Update fork's main from upstream/main (excluding workflow files)
         run: |
+          # Erstelle temporären Branch für den Sync
           set -e
           git fetch upstream main
-          git push origin upstream/main:main --force
+          git checkout -b temp-sync-branch upstream/main
+          
+          # Hole aktuellen Stand von main
+          git fetch origin main:refs/remotes/origin/main
+          
+          # Kopiere .github/workflows von origin/main
+          mkdir -p .github/workflows-backup
+          cp -r .github/workflows/* .github/workflows-backup/ 2>/dev/null || true
+          git checkout origin/main -- .github/workflows
+          
+          # Commit die Änderungen
+          git add .github/workflows
+          git diff --staged --quiet || git commit -m "Preserve workflow files from fork"
+          
+          # Push zum main branch
+          git push origin temp-sync-branch:main --force
 
       # Alte Backups entfernen
       - name: Prune backup branches older than RETENTION_DAYS
@@ -62,8 +78,9 @@ jobs:
             | awk '{print $2}' | sed 's#refs/heads/##' \
             | while read -r br; do
                 DATE_PART="${br##${BACKUP_PREFIX}}"
-                if [[ "$DATE_PART" < "$CUTOFF" ]]; then
-                  echo "Deleting old backup branch: $br"
+                # Verwende date für einen korrekten Datumsvergleich
+                if [[ $(date -d "$DATE_PART" +%s 2>/dev/null) -lt $(date -d "$CUTOFF" +%s 2>/dev/null) ]]; then
+                  echo "Lösche alten Branch: $br (Datum: $DATE_PART, älter als Cutoff: $CUTOFF)"
                   git push origin --delete "$br"
                 fi
               done
