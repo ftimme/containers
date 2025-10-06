@@ -10,7 +10,7 @@ permissions:
 
 env:
   UPSTREAM: https://github.com/bitnami/containers.git
-  RETENTION_DAYS: "28"
+  RETENTION_DAYS: "60"
   BACKUP_PREFIX: "backup/main-"
   TZ: "Europe/Berlin"
 
